@@ -7,7 +7,7 @@ from __future__ import division
 import logging
 import numpy as np
 from scipy.stats import poisson, itemfreq
-from scipy.spatial import distance
+from scipy.stats import ks_2samp
 import scipy.special as special
 from sklearn import cluster
 from sklearn.neighbors import KDTree
@@ -66,31 +66,6 @@ class Core(object):
     
     Np : int
         Number of the selected IFs.
-    
-    cluster_id : numpy.ndarray, (shape = (N,))
-        Cluster labels for each point in *pos*. -1 indicates noisy points.
-    
-    Nc : int
-        Cluster number.
-    
-    clusters : dict
-        Details of each cluster. "Average density", "radius",
-        "area (polygon)", "point coordinates", and "object number" are all
-        recorded.
-    
-    Hulls : dict
-        Details of each convex hull (clusters which can be enclosed by a
-        convex polygon).
-    
-    ptrace : list of int
-        Labels of clusters in which all points are collinear. These
-        clusters cannot be enclosed by a convex polygon.
-    
-    gden : float, [0, 1]
-        Weighted average density.
-    
-    coverage : float, [0, 1]
-        Total coverage of clusters.
     
     """
     def __init__(self, matrix, left = 0):
@@ -291,8 +266,9 @@ class Core(object):
         --------
         sklearn.neighbors.KDTree : an implementation of KDTree.
         """
-        if self.Np < 5: # Lower bound for input
+        if self.Np < k + 5: # Lower bound for input
             self.mean_dist = np.nan
+            self.mean_dist_all = np.nan
             return
         
         self._kdtree = KDTree(self.pos)
@@ -300,7 +276,31 @@ class Core(object):
         self._DKNN = dist[:, 1:]
         self._KNN = ind[:, 1:]
 
-        self.mean_dist = self._DKNN.mean()
+        self.mean_dist_all = self._DKNN.mean(axis=1)
+        self.mean_dist = self.mean_dist_all.mean()
+
+
+def compare_2sample(dist_1, dist_2):
+    """Compare 2 sample, calculate the p-value and the difference(sample2 - sample1) of MDKNN.
+    Statistical test using the two-sided Kolmogorov-Smirnov Test on 2 samples.
+
+    Parameters
+    ----------
+    dist_1 : numpy.ndarray, (ndim=1)
+        Mean distances of k nearested neighbors of all significant interactions in sample1.
+        It is be calculated by :py:meth:`tadlib.mdknn.analyze.Core.MDKNN`.
+
+    dist_2 : numpy.ndarray, (ndim=1)
+        Sample2.
+
+    See Also
+    --------
+    scipy.stats.ks_2samp : an implementation of KS-Test
+    """
+    D, pvalue = ks_2samp(dist_1, dist_2)
+    diff = dist_2.mean() - dist_1.mean()
+    return pvalue, D, diff
+
 
 def getmatrix(inter, l_bin, r_bin):
     """Extract regional interaction data and place it into a matrix.

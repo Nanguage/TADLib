@@ -2,14 +2,21 @@
 
 ## Required modules
 from __future__ import division
-import argparse, sys, logging, logging.handlers, tadlib
+import argparse, sys, logging, logging.handlers
+
+import cooler
+import numpy as np
+
+import tadlib
+from tadlib.mdknn import analyze
+
 
 currentVersion = tadlib.__version__
 
 def getargs():
     ## Construct an ArgumentParser object for command-line arguments
     parser = argparse.ArgumentParser(usage = '%(prog)s [options]\n\n'
-                                     'CALFEA -- CALculate FEAture for TADs',
+                                     'MDKNN -- Mean Distance of k Nearest Neighbors',
                                     description = '''The calculation is implemented by identifying
                                     long-range significant interactions for each TAD and looking for
                                     the aggregation patterns thereof. For more details, please refer
@@ -26,14 +33,16 @@ def getargs():
                         help = 'Output file name.')
     
     ## Argument Groups
-    group_1 = parser.add_argument_group(title = 'Relate to the input:')
+    group_1 = parser.add_argument_group(title = 'Relate to the input')
     group_1.add_argument('-p', '--path', default = '.',
+                         help = 'Path to the cool URI')
+    group_1.add_argument('-p2', '--path-2',
                          help = 'Path to the cool URI')
     group_1.add_argument('-t', '--tad-file', help = 'Path to the TAD file.')
     
     ## About the algorithm
     group_3 = parser.add_argument_group(title = 'Feature calculation')
-    group_3.add_argument('-k', type = int, default = 4, help = '''Number of nearest neighbors.''')
+    group_3.add_argument('-k', type = int, default = 4, help = 'Number of nearest neighbors.')
     group_3.add_argument('--pw', type = int, default = 2, help = '''Width of the interaction
                          region surrounding the peak. According to experience, we set it
                          to 1 at 20 kb, 2 at 10 kb, and 4 at 5 kb.''')
@@ -54,11 +63,155 @@ def getargs():
     
     return args, commands
 
+
+def get_gap_ratio(matrix):
+    newM, _ = analyze.manipulation(matrix)
+    if len(matrix) > 0:
+        # Ratio of Gaps (Vacant Rows or Columns)
+        gaps = 1 - len(newM) / len(matrix)
+    else:
+        gaps = 1.0
+    return newM, gaps
+
+
 ## Pipeline
-def pipe():
+def pipe(args, logger):
     """The Main pipeline for CALFEA.
     
     """
+    ## Logging for argument setting
+    arglist = ['# ARGUMENT LIST:',
+               '# output file name = {0}'.format(args.output),
+               '# Hi-C path = {0}'.format(args.path),
+               '# TAD source file = {0}'.format(args.tad_file),
+               '# Peak window width = {0}'.format(args.pw),
+               '# Donut width = {0}'.format(args.ww),
+               '# Noise filtering ratio = {0}'.format((1 - args.top)),
+               '# Significant interaction ratio = {0}'.format(args.ratio),
+                '# Maximum gap ratio = {0}'.format(args.gap)]
+    
+    argtxt = '\n'.join(arglist)
+    logger.info('\n' + argtxt)
+             
+    logger.info('Read Hi-C data ...')
+    workInters = cooler.Cooler(args.path)
+
+    # Load External TAD File, Columns 0,1,2
+    logger.info('Read external TAD data ...')
+    workTAD = analyze.load_TAD(args.tad_file)
+    
+    # Header
+    H = ['ChromID', 'Start', 'End', 'AP', 'Gap-Ratio']
+    outstream = open(args.output, 'w')
+    outstream.write('\t'.join(H) + '\n')
+    logger.info('Calculate feature for each TAD ...')
+    for c in workInters.chromnames:
+        logger.info('Chromosome %s', c)
+        d_data = workTAD[workTAD['chr'] == c]
+        for d in d_data:
+            # Interaction Matrix
+            if 'weight' in workInters.bins().keys():
+                matrix = workInters.matrix(balance=True, sparse=False).fetch((c, d['start'], min(d['end'], workInters.chromsizes[c])))
+            else:
+                matrix = workInters.matrix(balance=False, sparse=False).fetch((c, d['start'], min(d['end'], workInters.chromsizes[c])))
+
+            matrix[np.isnan(matrix)] = 0
+
+            newM, gaps = get_gap_ratio(matrix)
+            
+            if (gaps < args.gap) and (newM.shape[0] > (args.ww * 2 + 1)):
+                workCore = analyze.Core(matrix)
+                # Extract Long-Range Interactions
+                workCore.longrange(pw = args.pw, ww = args.ww, top = args.top, ratio = args.ratio)
+                # Feature
+                workCore.MDKNN(k=args.k)
+                # Line by Line
+                wL = [c, str(d['start']), str(d['end']), str(workCore.mean_dist), str(gaps)]
+            else:
+                # Bad Domain!
+                wL = [c, str(d['start']), str(d['end']), '-1', str(gaps)]
+            outstream.write('\t'.join(wL) + '\n')
+    logger.info('Done!')
+    logger.info('Write results to %s ...', args.output)
+    outstream.flush()
+    outstream.close()
+    logger.info('Done!\n')
+
+
+def pipe_comparision(args, logger):
+    ## Logging for argument setting
+    arglist = ['# ARGUMENT LIST:',
+               '# output file name = {0}'.format(args.output),
+               '# Comparision mode: True',
+               '# Hi-C path 1 = {0}'.format(args.path),
+               '# Hi-C path 2 = {0}'.format(args.path_2),
+               '# TAD source file = {0}'.format(args.tad_file),
+               '# Peak window width = {0}'.format(args.pw),
+               '# Donut width = {0}'.format(args.ww),
+               '# Noise filtering ratio = {0}'.format((1 - args.top)),
+               '# Significant interaction ratio = {0}'.format(args.ratio),
+               '# Maximum gap ratio = {0}'.format(args.gap)]
+
+    argtxt = '\n'.join(arglist)
+    logger.info('\n' + argtxt)
+
+    logger.info('Read Hi-C data ...')
+    workInters_1 = cooler.Cooler(args.path)
+    workInters_2 = cooler.Cooler(args.path_2)
+
+    # Load External TAD File, Columns 0,1,2
+    logger.info('Read external TAD data ...')
+    workTAD = analyze.load_TAD(args.tad_file)
+
+    # Header
+    H = ['ChromID', 'Start', 'End', 'MDKNN1', 'MDKNN2', 'D', 'p-value', 'Gap-Ratio-1', 'Gap-Ratio-2']
+
+    outstream = open(args.output, 'w')
+    outstream.write('\t'.join(H) + '\n')
+    logger.info('Calculate feature for each TAD ...')
+    for c in workInters_1.chromnames:
+        logger.info('Chromosome %s', c)
+        d_data = workTAD[workTAD['chr'] == c]
+        for d in d_data:
+            # Interaction Matrix
+            balance = 'weight' in workInters_1.bins().keys()
+            matrix_1 = workInters_1.matrix(balance=balance, sparse=False).fetch((c, d['start'], min(d['end'], workInters_1.chromsizes[c])))
+            matrix_2 = workInters_2.matrix(balance=balance, sparse=False).fetch((c, d['start'], min(d['end'], workInters_1.chromsizes[c])))
+
+            matrix_1[np.isnan(matrix_1)] = 0
+            matrix_2[np.isnan(matrix_2)] = 0
+
+            newM_1, gaps_1 = get_gap_ratio(matrix_1)
+            newM_2, gaps_2 = get_gap_ratio(matrix_2)
+            
+            if (gaps_1 < args.gap) and (newM_1.shape[0] > (args.ww * 2 + 1)) and \
+               (gaps_2 < args.gap) and (newM_2.shape[0] > (args.ww * 2 + 1)):
+
+                workCore_1 = analyze.Core(matrix_1)
+                workCore_1.longrange(pw = args.pw, ww = args.ww, top = args.top, ratio = args.ratio)
+                workCore_1.MDKNN(k=args.k)
+
+                workCore_2 = analyze.Core(matrix_2)
+                workCore_2.longrange(pw = args.pw, ww = args.ww, top = args.top, ratio = args.ratio)
+                workCore_2.MDKNN(k=args.k)
+                if (workCore_1.mean_dist_all is np.nan) or (workCore_2.mean_dist_all is np.nan):
+                    # Bad Domain!
+                    wL = [c, str(d['start']), str(d['end']), '-1', '-1', 'nan', 'nan', str(gaps_1), str(gaps_2)]
+                else:
+                    pvalue, D, diff = analyze.compare_2sample(workCore_1.mean_dist_all, workCore_2.mean_dist_all)
+                    wL = [c, str(d['start']), str(d['end']), str(workCore_1.mean_dist), str(workCore_2.mean_dist), str(D), str(pvalue), str(gaps_1), str(gaps_2)]
+            else:
+                # Bad Domain!
+                wL = [c, str(d['start']), str(d['end']), '-1', '-1', 'nan', 'nan', str(gaps_1), str(gaps_2)]
+            outstream.write('\t'.join(wL) + '\n')
+    logger.info('Done!')
+    logger.info('Write results to %s ...', args.output)
+    outstream.flush()
+    outstream.close()
+    logger.info('Done!\n')
+
+
+def main():
     # Parse Arguments
     args, commands = getargs()
     # Improve the performance if you don't want to run it
@@ -67,7 +220,7 @@ def pipe():
         logger = logging.getLogger()
         logger.setLevel(10)
         console = logging.StreamHandler()
-        filehandler = logging.handlers.RotatingFileHandler('calfea.log',
+        filehandler = logging.handlers.RotatingFileHandler('mdknn.log',
                                                            maxBytes = 30000,
                                                            backupCount = 5)
         # Set level for Handlers
@@ -82,72 +235,17 @@ def pipe():
         # Add Handlers
         logger.addHandler(console)
         logger.addHandler(filehandler)
-        ## Logging for argument setting
-        arglist = ['# ARGUMENT LIST:',
-                   '# output file name = {0}'.format(args.output),
-                   '# Hi-C path = {0}'.format(args.path),
-                   '# TAD source file = {0}'.format(args.tad_file),
-                   '# Peak window width = {0}'.format(args.pw),
-                   '# Donut width = {0}'.format(args.ww),
-                   '# Noise filtering ratio = {0}'.format((1 - args.top)),
-                   '# Significant interaction ratio = {0}'.format(args.ratio),
-                   '# Maximum gap ratio = {0}'.format(args.gap)
-                   ]
-        
-        argtxt = '\n'.join(arglist)
-        logger.info('\n' + argtxt)
-                 
-        from tadlib.mdknn import analyze
-        import cooler
-        import numpy as np
-        
-        logger.info('Read Hi-C data ...')
-        workInters = cooler.Cooler(args.path)
-        # Load External TAD File, Columns 0,1,2
-        logger.info('Read external TAD data ...')
-        workTAD = analyze.load_TAD(args.tad_file)
-    
-        # Header
-        H = ['ChromID', 'Start', 'End', 'AP', 'Gap-Ratio']
-        outstream = open(args.output, 'w')
-        outstream.write('\t'.join(H) + '\n')
-        logger.info('Calculate feature for each TAD ...')
-        for c in workInters.chromnames:
-            logger.info('Chromosome %s', c)
-            d_data = workTAD[workTAD['chr'] == c]
-            for d in d_data:
-                # Interaction Matrix
-                if 'weight' in workInters.bins().keys():
-                    matrix = workInters.matrix(balance=True, sparse=False).fetch((c, d['start'], min(d['end'], workInters.chromsizes[c])))
-                else:
-                    matrix = workInters.matrix(balance=False, sparse=False).fetch((c, d['start'], min(d['end'], workInters.chromsizes[c])))
-                
-                matrix[np.isnan(matrix)] = 0
-                
-                newM, _ = analyze.manipulation(matrix)
-                if len(matrix) > 0:
-                    # Ratio of Gaps (Vacant Rows or Columns)
-                    gaps = 1 - len(newM) / len(matrix)
-                else:
-                    gaps = 1.0
-                
-                if (gaps < args.gap) and (newM.shape[0] > (args.ww * 2 + 1)):
-                    workCore = analyze.Core(matrix)
-                    # Extract Long-Range Interactions
-                    workCore.longrange(pw = args.pw, ww = args.ww, top = args.top, ratio = args.ratio)
-                    # Feature
-                    workCore.MDKNN(k=args.k)
-                    # Line by Line
-                    wL = [c, str(d['start']), str(d['end']), str(workCore.mean_dist), str(gaps)]
-                else:
-                    # Bad Domain!
-                    wL = [c, str(d['start']), str(d['end']), '-1', str(gaps)]
-                outstream.write('\t'.join(wL) + '\n')
-        logger.info('Done!')
-        logger.info('Write results to %s ...', args.output)
-        outstream.flush()
-        outstream.close()
-        logger.info('Done!\n')
+
+        # compare 2 sample or not
+        comparision = False
+        if args.path_2:
+            comparision = True
+
+        if comparision:
+            pipe_comparision(args, logger)
+        else:
+            pipe(args, logger)
+
 
 if __name__ == '__main__':
-    pipe()
+    main()
