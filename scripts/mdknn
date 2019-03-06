@@ -171,7 +171,10 @@ def pipe_comparision(args, logger):
     logger.info('Calculate feature for each TAD ...')
     for c in workInters_1.chromnames:
         logger.info('Chromosome %s', c)
-        d_data = workTAD[workTAD['chr'] == c]
+        chrs = workTAD['chr']
+        if workTAD['chr'].shape[0] != 0 and not workTAD['chr'][0].startswith("chr"):
+            chrs = np.core.defchararray.add(np.repeat('chr', workTAD.shape[0]), chrs)
+        d_data = workTAD[chrs == c]
         for d in d_data:
             # Interaction Matrix
             balance = 'weight' in workInters_1.bins().keys()

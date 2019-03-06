@@ -79,6 +79,7 @@ class Core(object):
         
         # Manipulation, remove vacant rows and columns
         self.newM, self.convert = manipulation(matrix, left)
+        self._convert = np.array(list(self.convert[0].values()))
         
         ## Determine proper off-diagonal level
         Len = self.newM.shape[0]
@@ -240,6 +241,7 @@ class Core(object):
         sig_idx = np.argsort(RrPs)[:np.int(np.ceil(ratio/top*RrPs.size))]
         if sig_idx.size > 0:
             self.pos = np.r_['1,2,0', EM_idx[0][top_idx][Rnan][sig_idx], EM_idx[1][top_idx][Rnan][sig_idx]]
+            self.pos = self.convertPos(self.pos)
         else:
             self.pos = np.array([])
             
@@ -258,6 +260,16 @@ class Core(object):
         newM[x,y] = M
             
         return newM
+
+    def convertPos(self, pos):
+        """
+        Convert the coordinate of the points in the gap-free matrix
+        into the coordinate in the original matrix.
+        """
+        new_x = self._convert[self.pos[:, 0]]
+        new_y = self._convert[self.pos[:, 1]]
+        new_pos = np.c_[new_x, new_y]
+        return new_pos
 
     def MDKNN(self, k):
         """Cauculate MDKNN(Mean Distance of k Nearest Neighbors) of selected interactions.
