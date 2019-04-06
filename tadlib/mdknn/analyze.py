@@ -1,6 +1,4 @@
-# Created on Sat Sep 27 16:18:27 2014
-
-# Author: XiaoTao Wang
+# Author: XiaoTao Wang, Weize Xu
 # Organization: HuaZhong Agricultural University
 
 from __future__ import division
@@ -35,8 +33,11 @@ class Core(object):
     ----------
     matrix : numpy.ndarray, (ndim = 2)
         Interaction matrix of a TAD.
-    
-    left : int
+
+    k : int, optional
+        The number of nearest neighbors for calculate MDKNN. default 3.
+
+    left : int, optional
         Starting point of TAD. For example, if the bin size is 10kb,
         ``left = 50`` means position 500000(bp) on the genome.
     
@@ -66,9 +67,20 @@ class Core(object):
     
     Np : int
         Number of the selected IFs.
+
+    mean_dist : numpy.ndarray, (ndim = 1)
+        Mean distance of center to k nearest neighbors.
+
+    local_ap : numpy.ndarray, (ndim = 1)
+        Local aggregate preference of each sinificant interaction point,
+        equal to the reciprocal of mean distance.
     
     """
-    def __init__(self, matrix, left = 0):
+    def __init__(self, matrix, k=3, left = 0):
+        matrix[np.isnan(matrix)] = 0
+        self.k = k
+
+        self.matrix = matrix
 
         # rescale matrix
         nonzero = matrix[matrix.nonzero()]
@@ -271,13 +283,15 @@ class Core(object):
         new_pos = np.c_[new_x, new_y]
         return new_pos
 
-    def MDKNN(self, k):
+    def MDKNN(self):
         """Cauculate MDKNN(Mean Distance of k Nearest Neighbors) of selected interactions.
+        KD Tree is used for speed up nearest neighbor searching.
 
         See Also
         --------
         sklearn.neighbors.KDTree : an implementation of KDTree.
         """
+        k = self.k
         if self.Np < k + 5: # Lower bound for input
             self.mean_dist = np.nan
             self.mean_dist_all = np.nan
@@ -290,28 +304,42 @@ class Core(object):
 
         self.mean_dist_all = self._DKNN.mean(axis=1)
         self.mean_dist = self.mean_dist_all.mean()
+        self.local_ap = 1 / self.mean_dist_all
+        self.AP = self.local_ap.mean()
 
 
-def compare_2sample(dist_1, dist_2):
+class Compare(object):
     """Compare 2 sample, calculate the p-value and the difference(sample2 - sample1) of MDKNN.
     Statistical test using the two-sided Kolmogorov-Smirnov Test on 2 samples.
 
     Parameters
     ----------
-    dist_1 : numpy.ndarray, (ndim=1)
-        Mean distances of k nearested neighbors of all significant interactions in sample1.
-        It is be calculated by :py:meth:`tadlib.mdknn.analyze.Core.MDKNN`.
+    core1 : `tadlib.mdknn.analyze.Core`
+        Core of sample1.
 
-    dist_2 : numpy.ndarray, (ndim=1)
-        Sample2.
+    core2 : `tadlib.mdknn.analyze.Core`
+        Core of sample2.
 
-    See Also
-    --------
-    scipy.stats.ks_2samp : an implementation of KS-Test
     """
-    D, pvalue = ks_2samp(dist_1, dist_2)
-    diff = dist_2.mean() - dist_1.mean()
-    return pvalue, D, diff
+    def __init__(self, core1, core2):
+        self.core1 = core1
+        self.core2 = core2
+
+    def compare(self):
+        """
+        Perform two sample KS-Test calculate p-value.
+
+        See Also
+        --------
+        scipy.stats.ks_2samp : an implementation of KS-Test
+        """
+        dist1 = self.core1.local_ap
+        dist2 = self.core2.local_ap
+        D, pvalue = ks_2samp(dist1, dist2)
+        diff = dist2.mean() - dist1.mean()
+        self.D = D
+        self.pvalue = pvalue
+        self.diff = diff
 
 
 def getmatrix(inter, l_bin, r_bin):
