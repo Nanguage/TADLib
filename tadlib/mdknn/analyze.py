@@ -10,11 +10,36 @@ import scipy.special as special
 from sklearn import cluster
 from sklearn.neighbors import KDTree
 
-from tadlib.calfea.analyze import load_TAD, _fitting, manipulation
+from tadlib.calfea.analyze import _fitting, manipulation
 
 
 ## Customize the logger
 log = logging.getLogger(__name__)
+
+
+def load_TAD(path):
+    """ Load TAD file.
+
+    TAD file are tab splited file,
+    which have at least 3 columns: ['chr', 'start', 'end']
+
+    Parameters
+    ----------
+    path : str
+        Path to TAD file.
+
+    Return
+    ------
+    df : pandas.DataFrame
+    """
+    import pandas as pd
+    df = pd.read_csv(path, sep='\t', header=None)
+    df = df.iloc[:, :3]
+    df.columns = ['chr', 'start', 'end']
+    df['chr'] = df['chr'].astype('str')
+    if df.shape[0] > 0 and not df.iloc[0, 0].startswith('chr'):
+        df['chr'] = 'chr' + df['chr']
+    return df
 
 
 class Core(object):

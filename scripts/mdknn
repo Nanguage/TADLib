@@ -6,6 +6,9 @@ import argparse, sys, logging, logging.handlers
 
 import cooler
 import numpy as np
+import pandas as pd
+from tqdm import tqdm
+from statsmodels.stats.multitest import multipletests
 
 import tadlib
 from tadlib.mdknn import analyze
@@ -94,45 +97,45 @@ def pipe(args, logger):
     logger.info('\n' + argtxt)
              
     logger.info('Read Hi-C data ...')
-    workInters = cooler.Cooler(args.path)
+    cool = cooler.Cooler(args.path)
 
     # Load External TAD File, Columns 0,1,2
     logger.info('Read external TAD data ...')
-    workTAD = analyze.load_TAD(args.tad_file)
+
+    TADs = analyze.load_TAD(args.tad_file)
     
     # Header
-    H = ['ChromID', 'Start', 'End', 'AP', 'Gap-Ratio']
-    outstream = open(args.output, 'w')
-    outstream.write('\t'.join(H) + '\n')
-    logger.info('Calculate feature for each TAD ...')
-    for c in workInters.chromnames:
-        logger.info('Chromosome %s', c)
-        d_data = workTAD[workTAD['chr'] == c]
-        for d in d_data:
-            # Interaction Matrix
-            if 'weight' in workInters.bins().keys():
-                matrix = workInters.matrix(balance=True, sparse=False).fetch((c, d['start'], min(d['end'], workInters.chromsizes[c])))
-            else:
-                matrix = workInters.matrix(balance=False, sparse=False).fetch((c, d['start'], min(d['end'], workInters.chromsizes[c])))
+    header = ['ChromID', 'Start', 'End', 'AP', 'Gap-Ratio']
+    out_rows = []
 
-            newM, gaps = get_gap_ratio(matrix)
-            
-            if (gaps < args.gap) and (newM.shape[0] > (args.ww * 2 + 1)):
-                workCore = analyze.Core(matrix, k=args.k)
-                # Extract Long-Range Interactions
-                workCore.longrange(pw = args.pw, ww = args.ww, top = args.top, ratio = args.ratio)
-                # Feature
-                workCore.MDKNN()
-                # Line by Line
-                wL = [c, str(d['start']), str(d['end']), str(workCore.AP), str(gaps)]
-            else:
-                # Bad Domain!
-                wL = [c, str(d['start']), str(d['end']), '-1', str(gaps)]
-            outstream.write('\t'.join(wL) + '\n')
+    logger.info('Calculate feature for each TAD ...')
+    for i, row in tqdm(TADs.iterrows(), total=TADs.shape[0]):
+        chr_, start, end = row.chr, row.start, row.end
+
+        # Interaction Matrix
+        balance = 'weight' in cool.bins().keys()
+        matrix = cool.matrix(balance=balance,  sparse=False).fetch((chr_, start, min(end, cool.chromsizes[chr_])))
+
+        newM, gaps = get_gap_ratio(matrix)
+        if (gaps < args.gap) and (newM.shape[0] > (args.ww * 2 + 1)):
+            core = analyze.Core(matrix, k=args.k)
+            # Extract Long-Range Interactions
+            core.longrange(pw=args.pw, ww=args.ww, top=args.top, ratio=args.ratio)
+            # Feature
+            core.MDKNN()
+
+            # Line by Line
+            o_row = [chr_, start, end, core.AP, gaps]
+        else:
+            # Bad Domain!
+            o_row = [chr_, start, end, np.nan, gaps]
+        out_rows.append(o_row)
     logger.info('Done!')
+    out_df = pd.DataFrame(out_rows)
+    out_df.columns = header
+
     logger.info('Write results to %s ...', args.output)
-    outstream.flush()
-    outstream.close()
+    out_df.to_csv(args.output, na_rep='NA', sep='\t', index=False)
     logger.info('Done!\n')
 
 
@@ -154,61 +157,67 @@ def pipe_compare(args, logger):
     logger.info('\n' + argtxt)
 
     logger.info('Read Hi-C data ...')
-    workInters_1 = cooler.Cooler(args.path)
-    workInters_2 = cooler.Cooler(args.path_2)
+    cool_1 = cooler.Cooler(args.path)
+    cool_2 = cooler.Cooler(args.path_2)
 
     # Load External TAD File, Columns 0,1,2
     logger.info('Read external TAD data ...')
-    workTAD = analyze.load_TAD(args.tad_file)
+    TADs = analyze.load_TAD(args.tad_file)
 
+    out_rows = []
     # Header
-    H = ['ChromID', 'Start', 'End', 'AP1', 'AP2', 'D', 'p-value', 'Gap-Ratio-1', 'Gap-Ratio-2']
+    header = ['ChromID', 'Start', 'End', 'AP1', 'AP2', 'D', 'p-value', 'padj', 'Gap-Ratio-1', 'Gap-Ratio-2']
 
-    outstream = open(args.output, 'w')
-    outstream.write('\t'.join(H) + '\n')
     logger.info('Calculate feature for each TAD ...')
-    for c in workInters_1.chromnames:
-        logger.info('Chromosome %s', c)
-        chrs = workTAD['chr']
-        if workTAD['chr'].shape[0] != 0 and not workTAD['chr'][0].startswith("chr"):
-            chrs = np.core.defchararray.add(np.repeat('chr', workTAD.shape[0]), chrs)
-        d_data = workTAD[chrs == c]
-        for d in d_data:
-            # Interaction Matrix
-            balance = 'weight' in workInters_1.bins().keys()
-            matrix_1 = workInters_1.matrix(balance=balance, sparse=False).fetch((c, d['start'], min(d['end'], workInters_1.chromsizes[c])))
-            matrix_2 = workInters_2.matrix(balance=balance, sparse=False).fetch((c, d['start'], min(d['end'], workInters_1.chromsizes[c])))
+    for i, row in tqdm(TADs.iterrows(), total=TADs.shape[0]):
+        chr_, start, end = row.chr, row.start, row.end
 
-            newM_1, gaps_1 = get_gap_ratio(matrix_1)
-            newM_2, gaps_2 = get_gap_ratio(matrix_2)
+        # Interaction Matrix
+        balance = 'weight' in cool_1.bins().keys()
+        matrix_1 = cool_1.matrix(balance=balance,  sparse=False).fetch((chr_, start, min(end, cool_1.chromsizes[chr_])))
+        balance = 'weight' in cool_2.bins().keys()
+        matrix_2 = cool_2.matrix(balance=balance,  sparse=False).fetch((chr_, start, min(end, cool_2.chromsizes[chr_])))
+
+        newM_1, gaps_1 = get_gap_ratio(matrix_1)
+        newM_2, gaps_2 = get_gap_ratio(matrix_2)
             
-            if (gaps_1 < args.gap) and (newM_1.shape[0] > (args.ww * 2 + 1)) and \
-               (gaps_2 < args.gap) and (newM_2.shape[0] > (args.ww * 2 + 1)):
+        if (gaps_1 < args.gap) and (newM_1.shape[0] > (args.ww * 2 + 1)) and \
+           (gaps_2 < args.gap) and (newM_2.shape[0] > (args.ww * 2 + 1)):
 
-                workCore_1 = analyze.Core(matrix_1, k=args.k)
-                workCore_1.longrange(pw = args.pw, ww = args.ww, top = args.top, ratio = args.ratio)
-                workCore_1.MDKNN()
+            core_1 = analyze.Core(matrix_1, k=args.k)
+            core_1.longrange(pw = args.pw, ww = args.ww, top = args.top, ratio = args.ratio)
+            core_1.MDKNN()
 
-                workCore_2 = analyze.Core(matrix_2, k=args.k)
-                workCore_2.longrange(pw = args.pw, ww = args.ww, top = args.top, ratio = args.ratio)
-                workCore_2.MDKNN()
-                comp = analyze.Compare(workCore_1, workCore_2)
-                if (workCore_1.mean_dist_all is np.nan) or (workCore_2.mean_dist_all is np.nan):
-                    # Bad Domain!
-                    wL = [c, str(d['start']), str(d['end']), '-1', '-1', 'nan', 'nan', str(gaps_1), str(gaps_2)]
-                else:
-                    comp.compare()
-                    pvalue, D = comp.pvalue, comp.D
-                    wL = [c, str(d['start']), str(d['end']),
-                          str(workCore_1.AP), str(workCore_2.AP), str(D), str(pvalue), str(gaps_1), str(gaps_2)]
-            else:
+            core_2 = analyze.Core(matrix_2, k=args.k)
+            core_2.longrange(pw = args.pw, ww = args.ww, top = args.top, ratio = args.ratio)
+            core_2.MDKNN()
+            comp = analyze.Compare(core_1, core_2)
+            if (core_1.mean_dist_all is np.nan) or (core_2.mean_dist_all is np.nan):
                 # Bad Domain!
-                wL = [c, str(d['start']), str(d['end']), '-1', '-1', 'nan', 'nan', str(gaps_1), str(gaps_2)]
-            outstream.write('\t'.join(wL) + '\n')
+                o_row = [chr_, start, end, np.nan, np.nan, np.nan, np.nan, np.nan, gaps_1, gaps_2]
+            else:
+                comp.compare()
+                pvalue, D = comp.pvalue, comp.D
+                o_row = [chr_, start, end, core_1.AP, core_2.AP, D, pvalue, np.nan, gaps_1, gaps_2]
+        else:
+            # Bad Domain!
+            o_row = [chr_, start, end, np.nan, np.nan, np.nan, np.nan, np.nan, gaps_1, gaps_2]
+            
+        out_rows.append(o_row)
+    
+    out_df = pd.DataFrame(out_rows)
+    out_df.columns = header
+
+    logger.info("Perform multiple test correction with fdr_bh method.")
+    pvals = out_df['p-value']
+    pvals_ = pvals[~pvals.isna()]
+    _, padjs, _, _ = multipletests(pvals_, method='fdr_bh')
+    out_df.loc[pvals_.index, 'padj'] = padjs
+
     logger.info('Done!')
     logger.info('Write results to %s ...', args.output)
-    outstream.flush()
-    outstream.close()
+    out_df.to_csv(args.output, sep='\t', na_rep='NA', index=False)
+
     logger.info('Done!\n')
 
 
