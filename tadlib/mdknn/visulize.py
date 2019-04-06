@@ -64,7 +64,7 @@ def plot_compare(compare,
     ax2.set_title(title2)
 
     center_text = region + "\n" if region else ""
-    center_text += f"p-value: {compare.pvalue}\ndifference: {compare.difference}"
+    center_text += f"k: {compare.k}\np-value: {compare.pvalue}\ndifference: {compare.diff}"
     fig.text(0.42, 0.27, , fontsize=20)
     return fig
 

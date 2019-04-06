@@ -295,6 +295,8 @@ class Core(object):
         if self.Np < k + 5: # Lower bound for input
             self.mean_dist = np.nan
             self.mean_dist_all = np.nan
+            self.AP = np.nan
+            self.local_ap = np.nan
             return
         
         self._kdtree = KDTree(self.pos)

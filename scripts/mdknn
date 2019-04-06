@@ -65,6 +65,7 @@ def getargs():
 
 
 def get_gap_ratio(matrix):
+    matrix[np.isnan(matrix)] = 0
     newM, _ = analyze.manipulation(matrix)
     if len(matrix) > 0:
         # Ratio of Gaps (Vacant Rows or Columns)
@@ -76,8 +77,7 @@ def get_gap_ratio(matrix):
 
 ## Pipeline
 def pipe(args, logger):
-    """The Main pipeline for CALFEA.
-    
+    """The Main pipeline for MDKNN.
     """
     ## Logging for argument setting
     arglist = ['# ARGUMENT LIST:',
@@ -88,7 +88,7 @@ def pipe(args, logger):
                '# Donut width = {0}'.format(args.ww),
                '# Noise filtering ratio = {0}'.format((1 - args.top)),
                '# Significant interaction ratio = {0}'.format(args.ratio),
-                '# Maximum gap ratio = {0}'.format(args.gap)]
+               '# Maximum gap ratio = {0}'.format(args.gap)]
     
     argtxt = '\n'.join(arglist)
     logger.info('\n' + argtxt)
@@ -115,18 +115,16 @@ def pipe(args, logger):
             else:
                 matrix = workInters.matrix(balance=False, sparse=False).fetch((c, d['start'], min(d['end'], workInters.chromsizes[c])))
 
-            matrix[np.isnan(matrix)] = 0
-
             newM, gaps = get_gap_ratio(matrix)
             
             if (gaps < args.gap) and (newM.shape[0] > (args.ww * 2 + 1)):
-                workCore = analyze.Core(matrix)
+                workCore = analyze.Core(matrix, k=args.k)
                 # Extract Long-Range Interactions
                 workCore.longrange(pw = args.pw, ww = args.ww, top = args.top, ratio = args.ratio)
                 # Feature
-                workCore.MDKNN(k=args.k)
+                workCore.MDKNN()
                 # Line by Line
-                wL = [c, str(d['start']), str(d['end']), str(workCore.mean_dist), str(gaps)]
+                wL = [c, str(d['start']), str(d['end']), str(workCore.AP), str(gaps)]
             else:
                 # Bad Domain!
                 wL = [c, str(d['start']), str(d['end']), '-1', str(gaps)]
@@ -138,7 +136,7 @@ def pipe(args, logger):
     logger.info('Done!\n')
 
 
-def pipe_comparision(args, logger):
+def pipe_compare(args, logger):
     ## Logging for argument setting
     arglist = ['# ARGUMENT LIST:',
                '# output file name = {0}'.format(args.output),
@@ -164,7 +162,7 @@ def pipe_comparision(args, logger):
     workTAD = analyze.load_TAD(args.tad_file)
 
     # Header
-    H = ['ChromID', 'Start', 'End', 'MDKNN1', 'MDKNN2', 'D', 'p-value', 'Gap-Ratio-1', 'Gap-Ratio-2']
+    H = ['ChromID', 'Start', 'End', 'AP1', 'AP2', 'D', 'p-value', 'Gap-Ratio-1', 'Gap-Ratio-2']
 
     outstream = open(args.output, 'w')
     outstream.write('\t'.join(H) + '\n')
@@ -181,28 +179,28 @@ def pipe_comparision(args, logger):
             matrix_1 = workInters_1.matrix(balance=balance, sparse=False).fetch((c, d['start'], min(d['end'], workInters_1.chromsizes[c])))
             matrix_2 = workInters_2.matrix(balance=balance, sparse=False).fetch((c, d['start'], min(d['end'], workInters_1.chromsizes[c])))
 
-            matrix_1[np.isnan(matrix_1)] = 0
-            matrix_2[np.isnan(matrix_2)] = 0
-
             newM_1, gaps_1 = get_gap_ratio(matrix_1)
             newM_2, gaps_2 = get_gap_ratio(matrix_2)
             
             if (gaps_1 < args.gap) and (newM_1.shape[0] > (args.ww * 2 + 1)) and \
                (gaps_2 < args.gap) and (newM_2.shape[0] > (args.ww * 2 + 1)):
 
-                workCore_1 = analyze.Core(matrix_1)
+                workCore_1 = analyze.Core(matrix_1, k=args.k)
                 workCore_1.longrange(pw = args.pw, ww = args.ww, top = args.top, ratio = args.ratio)
-                workCore_1.MDKNN(k=args.k)
+                workCore_1.MDKNN()
 
-                workCore_2 = analyze.Core(matrix_2)
+                workCore_2 = analyze.Core(matrix_2, k=args.k)
                 workCore_2.longrange(pw = args.pw, ww = args.ww, top = args.top, ratio = args.ratio)
-                workCore_2.MDKNN(k=args.k)
+                workCore_2.MDKNN()
+                comp = analyze.Compare(workCore_1, workCore_2)
                 if (workCore_1.mean_dist_all is np.nan) or (workCore_2.mean_dist_all is np.nan):
                     # Bad Domain!
                     wL = [c, str(d['start']), str(d['end']), '-1', '-1', 'nan', 'nan', str(gaps_1), str(gaps_2)]
                 else:
-                    pvalue, D, diff = analyze.compare_2sample(workCore_1.mean_dist_all, workCore_2.mean_dist_all)
-                    wL = [c, str(d['start']), str(d['end']), str(workCore_1.mean_dist), str(workCore_2.mean_dist), str(D), str(pvalue), str(gaps_1), str(gaps_2)]
+                    comp.compare()
+                    pvalue, D = comp.pvalue, comp.D
+                    wL = [c, str(d['start']), str(d['end']),
+                          str(workCore_1.AP), str(workCore_2.AP), str(D), str(pvalue), str(gaps_1), str(gaps_2)]
             else:
                 # Bad Domain!
                 wL = [c, str(d['start']), str(d['end']), '-1', '-1', 'nan', 'nan', str(gaps_1), str(gaps_2)]
@@ -245,7 +243,7 @@ def main():
             comparision = True
 
         if comparision:
-            pipe_comparision(args, logger)
+            pipe_compare(args, logger)
         else:
             pipe(args, logger)
 
