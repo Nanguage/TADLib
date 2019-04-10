@@ -44,7 +44,7 @@ def plot_compare(compare,
     dot_color : str
         Color of significant interaction point in contact map.
     """
-    kwargs.update("figsize", (20,20))  # set default fig size
+    kwargs.update({"figsize": (20, 20)})  # set default fig size
     fig, (ax1, ax2) = plt.subplots(1, 2, **kwargs)
 
     c1 = compare.core1
@@ -54,17 +54,17 @@ def plot_compare(compare,
     plot_contact_map(np.log2(c1.matrix), ax=ax1)
     ax1.scatter(c1.pos[:, 0], c1.pos[:, 1], s=10, c="#0000FF")
     title1 = sample1_name + "\n" if sample1_name else ""
-    title1 += f"AP: {c1.AP}, mean distance: {c1.mean_dist}"
+    title1 += f"AP: {c1.AP}\nmean distance: {c1.mean_dist}"
     ax1.set_title(title1)
 
     plot_contact_map(np.log2(c2.matrix), ax=ax2)
     ax2.scatter(c2.pos[:, 0], c2.pos[:, 1], s=10, c="#0000FF")
     title2 = sample2_name + "\n" if sample2_name else ""
-    title2 += f"AP: {c2.AP}, mean distance: {c2.mean_dist}"
-    ax2.set_title(title2)
+    title2 += f"AP: {c2.AP}\nmean distance: {c2.mean_dist}"
+    ax2.set_title(title2, fontsize=16)
 
     center_text = region + "\n" if region else ""
-    center_text += f"k: {compare.k}\np-value: {compare.pvalue}\ndifference: {compare.diff}"
-    fig.text(0.42, 0.27, , fontsize=20)
+    center_text += f"k: {c1.k}\np-value: {compare.pvalue}\ndifference: {compare.diff}"
+    fig.text(0.42, 0.27, center_text, fontsize=20)
     return fig
 
