@@ -55,7 +55,7 @@ def plot_compare(compare,
     ax1.scatter(c1.pos[:, 0], c1.pos[:, 1], s=10, c="#0000FF")
     title1 = sample1_name + "\n" if sample1_name else ""
     title1 += f"AP: {c1.AP}\nmean distance: {c1.mean_dist}"
-    ax1.set_title(title1)
+    ax1.set_title(title1, fontsize=16)
 
     plot_contact_map(np.log2(c2.matrix), ax=ax2)
     ax2.scatter(c2.pos[:, 0], c2.pos[:, 1], s=10, c="#0000FF")
@@ -65,6 +65,6 @@ def plot_compare(compare,
 
     center_text = region + "\n" if region else ""
     center_text += f"k: {c1.k}\np-value: {compare.pvalue}\ndifference: {compare.diff}"
-    fig.text(0.42, 0.27, center_text, fontsize=20)
+    fig.text(0.42, 0.25, center_text, fontsize=20)
     return fig
 

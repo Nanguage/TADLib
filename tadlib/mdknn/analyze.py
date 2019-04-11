@@ -89,9 +89,6 @@ class Core(object):
     
     pos : numpy.ndarray, (shape = (N, 2))
         Coordinates of the selected IFs in *newM*.
-    
-    Np : int
-        Number of the selected IFs.
 
     mean_dist : numpy.ndarray, (ndim = 1)
         Mean distance of center to k nearest neighbors.
@@ -135,7 +132,7 @@ class Core(object):
         
         self._Ed = _fitting(diag, IFs)
         
-    def longrange(self, pw = 2, ww = 5, top = 0.7, ratio = 0.05):
+    def longrange(self, pw = 2, ww = 5, top = 0.7, ratio = 0.05, maxN = 200):
         """
         Select statistically significant interactions of the TAD. Both
         genomic distance and local interaction background are taken into
@@ -155,6 +152,10 @@ class Core(object):
         ratio : float, [0.01, 0.1]
             Specifies the sample size of significant interactions.
             Default: 0.05
+
+        maxN : int
+            Max number of the significant interactions.
+            Default: 200
         
         Notes
         -----
@@ -275,7 +276,8 @@ class Core(object):
         rPs = Ps[EM_idx][top_idx]
         Rnan = np.logical_not(np.isnan(rPs)) # Remove any invalid entry
         RrPs = rPs[Rnan]
-        sig_idx = np.argsort(RrPs)[:np.int(np.ceil(ratio/top*RrPs.size))]
+        Np = min(maxN, np.int(np.ceil(ratio/top*RrPs.size)))
+        sig_idx = np.argsort(RrPs)[:Np]
         if sig_idx.size > 0:
             self.pos = np.r_['1,2,0', EM_idx[0][top_idx][Rnan][sig_idx], EM_idx[1][top_idx][Rnan][sig_idx]]
             self.pos = self.convertPos(self.pos)

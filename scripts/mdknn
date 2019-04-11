@@ -56,6 +56,8 @@ def getargs():
                          ' will be eliminated.')
     group_3.add_argument('--ratio', type = float, default = 0.05, help = 'Specifies the sample'
                          ' ratio of significant interactions for TAD.')
+    group_3.add_argument('--maxN', type=int, default=200, help='Max number of '
+                         'significant interactions for TAD.')
     group_3.add_argument('--gap', type = float, default = 0.2, help = 'Maximum gap ratio.')
     
     ## Parse the command-line arguments
@@ -91,6 +93,7 @@ def pipe(args, logger):
                '# Donut width = {0}'.format(args.ww),
                '# Noise filtering ratio = {0}'.format((1 - args.top)),
                '# Significant interaction ratio = {0}'.format(args.ratio),
+               '# Max significant interaction number = {0}'.format(args.maxN),
                '# Maximum gap ratio = {0}'.format(args.gap)]
     
     argtxt = '\n'.join(arglist)
@@ -120,7 +123,7 @@ def pipe(args, logger):
         if (gaps < args.gap) and (newM.shape[0] > (args.ww * 2 + 1)):
             core = analyze.Core(matrix, k=args.k)
             # Extract Long-Range Interactions
-            core.longrange(pw=args.pw, ww=args.ww, top=args.top, ratio=args.ratio)
+            core.longrange(pw=args.pw, ww=args.ww, top=args.top, ratio=args.ratio, maxN=args.maxN)
             # Feature
             core.MDKNN()
 
@@ -151,6 +154,7 @@ def pipe_compare(args, logger):
                '# Donut width = {0}'.format(args.ww),
                '# Noise filtering ratio = {0}'.format((1 - args.top)),
                '# Significant interaction ratio = {0}'.format(args.ratio),
+               '# Max significant interaction number = {0}'.format(args.maxN),
                '# Maximum gap ratio = {0}'.format(args.gap)]
 
     argtxt = '\n'.join(arglist)
@@ -185,11 +189,11 @@ def pipe_compare(args, logger):
            (gaps_2 < args.gap) and (newM_2.shape[0] > (args.ww * 2 + 1)):
 
             core_1 = analyze.Core(matrix_1, k=args.k)
-            core_1.longrange(pw = args.pw, ww = args.ww, top = args.top, ratio = args.ratio)
+            core_1.longrange(pw = args.pw, ww = args.ww, top = args.top, ratio = args.ratio, maxN=args.maxN)
             core_1.MDKNN()
 
             core_2 = analyze.Core(matrix_2, k=args.k)
-            core_2.longrange(pw = args.pw, ww = args.ww, top = args.top, ratio = args.ratio)
+            core_2.longrange(pw = args.pw, ww = args.ww, top = args.top, ratio = args.ratio, maxN=args.maxN)
             core_2.MDKNN()
             comp = analyze.Compare(core_1, core_2)
             if (core_1.mean_dist_all is np.nan) or (core_2.mean_dist_all is np.nan):
